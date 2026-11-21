@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Pillbox — планировщик</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+:root{
+  /* Layout: one phone-width column, three steps (Лекарства → Мой день → Расписание), one action per screen */
+  --bg:#eef2f0; --surface:#ffffff; --ink:#17221e; --muted:#5f6e68; --line:#dbe3df;
+  --accent:#0d6b5d; --accent-ink:#ffffff; --accent-soft:#e0f0eb;
+  --morning:#d38a17; --day:#2f80c4; --evening:#cc5440; --night:#5a52a8;
+  --warn-bg:#fdf3e1; --warn:#8a5a0c; --crit-bg:#fbe9e7; --crit:#a5302a; --ok:#2c7f52; --ok-bg:#e3f3ea;
+  --f-body:"Golos Text",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f1513; --surface:#18201d; --ink:#e6eeea; --muted:#9aaba4; --line:#2b3632;
+    --accent:#45b7a3; --accent-ink:#0b1412; --accent-soft:#1c3832;
+    --morning:#f0ad45; --day:#5aa5e6; --evening:#ec7a66; --night:#968fe6;
+    --warn-bg:#33270f; --warn:#f0c172; --crit-bg:#3a1a18; --crit:#f4958d; --ok:#6fd09a; --ok-bg:#16301f;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0f1513; --surface:#18201d; --ink:#e6eeea; --muted:#9aaba4; --line:#2b3632;
+  --accent:#45b7a3; --accent-ink:#0b1412; --accent-soft:#1c3832;
+  --morning:#f0ad45; --day:#5aa5e6; --evening:#ec7a66; --night:#968fe6;
+  --warn-bg:#33270f; --warn:#f0c172; --crit-bg:#3a1a18; --crit:#f4958d; --ok:#6fd09a; --ok-bg:#16301f;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.45}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.app{max-width:480px;margin:0 auto;padding:16px 16px 120px;display:flex;flex-direction:column;gap:14px}
+.brand{display:flex;justify-content:space-between;align-items:center}
+.brand b{font-size:18px;letter-spacing:-.01em}
+.brand span{font-size:12px;color:var(--muted)}
+/* steps */
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:5px}
+.steps button{border:none;background:none;border-radius:10px;padding:8px 4px;cursor:pointer;font-size:14px;font-weight:600;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:1px}
+.steps button small{font-size:11px;font-weight:500}
+.steps button.on{background:var(--accent);color:var(--accent-ink)}
+h1{font-size:24px;line-height:1.2;margin:4px 0 0;text-wrap:balance}
+.lead{margin:0;color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:12px}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:12px 14px;cursor:pointer;font-weight:600;font-size:15px;text-align:center}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.ghost{background:none;border:1px dashed var(--accent);color:var(--accent)}
+.btn.link{border:none;background:none;color:var(--accent);padding:6px 0;font-weight:600;text-align:left}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.sticky{position:fixed;left:0;right:0;bottom:0;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(to top,var(--bg) 70%,transparent)}
+.sticky .btn{display:block;width:100%;max-width:448px;margin:0 auto;font-size:16px;padding:14px}
+/* medicine list */
+.med{display:flex;gap:12px;align-items:flex-start;cursor:pointer;border:none;background:none;text-align:left;width:100%;padding:0}
+.dot{width:14px;height:14px;border-radius:50%;flex:none;margin-top:5px}
+.med-main{flex:1;min-width:0}
+.med-main b{display:block;font-size:17px}
+.med-main span{color:var(--muted);font-size:14px}
+.edit-hint{font-size:13px;color:var(--accent);font-weight:600;white-space:nowrap;margin-top:3px}
+.blocked-note{color:var(--crit);font-size:13px;font-weight:600}
+/* form */
+.field{display:flex;flex-direction:column;gap:6px}
+.field > span{font-size:14px;font-weight:600}
+.field input,.field select,textarea{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:16px;width:100%;min-width:0}
+textarea{min-height:90px;resize:vertical}
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.seg button{flex:1 0 auto;min-width:44px;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:9px 10px;cursor:pointer;font-size:15px}
+.seg button.on{background:var(--accent-soft);border-color:var(--accent);font-weight:600}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+details.more summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14px}
+details.more[open] summary{margin-bottom:10px}
+.form-actions{display:flex;gap:8px}
+.form-actions .btn{flex:1}
+.del{color:var(--crit)}
+/* day */
+.trow{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:6px 0;border-top:1px solid var(--line)}
+.trow:first-child{border-top:none}
+.trow label{font-size:16px}
+.trow input{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:17px;width:136px}
+.toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:16px}
+.toggle input{width:22px;height:22px;accent-color:var(--accent)}
+.checks{display:flex;flex-wrap:wrap;gap:8px}
+.checks label{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:var(--bg);cursor:pointer}
+.checks input{accent-color:var(--accent);width:18px;height:18px}
+/* alerts */
+.alert{border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;font-size:15px}
+.alert b{font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+.alert.crit{background:var(--crit-bg);color:var(--crit)}
+.alert.warn{background:var(--warn-bg);color:var(--warn)}
+.alert.ok{background:var(--ok-bg);color:var(--ok)}
+.alert p{margin:0;color:var(--ink)}
+/* timeline */
+.dose{display:grid;grid-template-columns:66px 1fr;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.dose:first-child{border-top:none;padding-top:2px}
+.dose-time{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
+.slot{display:inline-block;margin-top:4px;font-size:12px;font-weight:600;color:#fff;border-radius:6px;padding:1px 7px}
+.s-morning{background:var(--morning)}.s-day{background:var(--day)}.s-evening{background:var(--evening)}.s-night{background:var(--night)}
+.pill-line{display:flex;gap:10px;align-items:flex-start}
+.pill-line + .pill-line{margin-top:8px}
+.pill-line b{font-size:16px}
+.how{font-size:14px;color:var(--muted)}
+.pack{font-size:13px;color:var(--warn);font-weight:600}
+/* box */
+.box{display:grid;grid-template-columns:34px repeat(7,minmax(0,1fr));gap:3px;font-size:11px;min-width:0}
+.box .rl{font-size:10.5px}
+.med-main b,.pill-line b,.alert p,.legend span,#tips li{overflow-wrap:anywhere;min-width:0}
+details.dev,.dev-body,.card{min-width:0;max-width:100%}
+pre.json{max-width:100%}
+.app > *,.dev-body > *,details.dev{min-width:0}
+.app > section{width:100%}
+.box .hd{text-align:center;color:var(--muted);font-weight:600}
+.box .hd.today{color:var(--accent)}
+.box .rl{display:flex;align-items:center;font-weight:600;color:var(--muted)}
+.cell{aspect-ratio:1/1.15;min-width:0;border:1px solid var(--line);border-radius:8px;background:var(--bg);display:flex;flex-wrap:wrap;align-content:center;justify-content:center;gap:3px;padding:3px}
+.cell i{width:10px;height:10px;border-radius:50%;display:block}
+.cell i.pk{background:transparent!important;border:2px dashed currentColor}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend .ring{width:12px;height:12px;border-radius:50%;border:2px dashed var(--muted)}
+.tips{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:15px}
+/* dev */
+details.dev{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:12px 14px}
+details.dev summary{cursor:pointer;font-weight:600;color:var(--muted)}
+.dev-body{display:flex;flex-direction:column;gap:12px;margin-top:12px}
+.dev-body h3{font-size:14px;margin:0}
+pre.json{font-family:var(--f-mono);font-size:11.5px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;max-height:300px;overflow:auto;margin:0;white-space:pre}
+.lcd{background:#2a3a23;border-radius:10px;padding:8px;display:inline-block}
+.lcd-screen{background:#9fcf5a;border-radius:4px;padding:5px 6px;display:flex;flex-direction:column;gap:2px}
+.lcd-line{display:grid;grid-template-columns:repeat(16,14px);gap:2px}
+.lcd-line span{font-family:var(--f-mono);font-size:13px;line-height:20px;height:20px;text-align:center;color:#1d3310;background:#8fbd4f}
+@media (max-width:380px){.lcd-line{grid-template-columns:repeat(16,11px)}.lcd-line span{font-size:11px}}
+table.cmp{border-collapse:collapse;width:100%;font-size:13px}
+table.cmp th,table.cmp td{border-bottom:1px solid var(--line);padding:5px;text-align:left;vertical-align:top}
+.small{font-size:13px;color:var(--muted)}
+.row-btns{display:flex;flex-wrap:wrap;gap:8px}
+.row-btns .btn{padding:8px 12px;font-size:14px}
+.success{text-align:center;align-items:center}
+.success .big{font-size:40px;line-height:1;color:var(--ok)}
+[hidden]{display:none!important}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="brand"><b>Smart Pillbox</b><span>прототип · демо-справочник</span></div>
+  <nav class="steps" id="steps">
+    <button data-tab="meds"><span>1. Лекарства</span><small id="st-meds"></small></button>
+    <button data-tab="day"><span>2. Мой день</span><small id="st-day"></small></button>
+    <button data-tab="plan"><span>3. Расписание</span><small id="st-plan"></small></button>
+  </nav>
+
+  <!-- STEP 1 -->
+  <section id="tab-meds" class="app" style="padding:0">
+    <div><h1>Что назначил врач?</h1><p class="lead">Добавьте лекарства из рецепта. Дозы не меняем — только подбираем время.</p></div>
+    <div class="card" id="ai-card">
+      <button class="btn ghost" id="ai-open">Вставить текст рецепта — ИИ заполнит сам</button>
+      <div id="ai-box" hidden class="field">
+        <textarea id="rx-text" placeholder="Например: Амоксиклав 875/125 по 1 таб 2 раза в день во время еды 7 дней"></textarea>
+        <button class="btn primary" id="btn-parse">Распознать</button>
+        <span class="small" id="parse-status"></span>
+      </div>
+    </div>
+    <div id="med-list" class="app" style="padding:0;gap:10px"></div>
+    <button class="btn" id="btn-add">+ Добавить лекарство</button>
+  </section>
+
+  <!-- STEP 2 -->
+  <section id="tab-day" class="app" style="padding:0" hidden>
+    <div><h1>Когда вы едите и спите?</h1><p class="lead">По этому режиму таблетница будет напоминать до, во время или после еды.</p></div>
+    <div class="card">
+      <div class="trow"><label for="r-wake_up">Встаю</label><input type="time" id="r-wake_up" data-r="wake_up"></div>
+      <div class="trow"><label for="r-breakfast">Завтрак</label><input type="time" id="r-breakfast" data-r="breakfast"></div>
+      <div class="trow"><label for="r-lunch">Обед</label><input type="time" id="r-lunch" data-r="lunch"></div>
+      <div class="trow"><label for="r-dinner">Ужин</label><input type="time" id="r-dinner" data-r="dinner"></div>
+      <div class="trow"><label for="r-sleep">Ложусь спать</label><input type="time" id="r-sleep" data-r="sleep"></div>
+    </div>
+    <div class="card">
+      <label class="toggle" for="p-fasting">Соблюдаю пост (Орозо)<input type="checkbox" id="p-fasting"></label>
+      <div id="fast-rows" hidden>
+        <div class="trow"><label for="r-suhoor">Сухур</label><input type="time" id="r-suhoor" data-r="suhoor"></div>
+        <div class="trow"><label for="r-iftar">Ифтар</label><input type="time" id="r-iftar" data-r="iftar"></div>
+      </div>
+    </div>
+    <div class="card">
+      <b>О здоровье</b>
+      <div class="two">
+        <label class="field"><span>Возраст</span><input type="number" id="p-age" min="1" max="120"></label>
+        <label class="field"><span>Аллергия на</span><input type="text" id="p-allergies" placeholder="нет"></label>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="p-stomach"> Желудок</label>
+        <label><input type="checkbox" id="p-kidney"> Почки</label>
+        <label><input type="checkbox" id="p-liver"> Печень</label>
+      </div>
+      <details class="more"><summary>Язык и экран таблетницы</summary>
+        <div class="two">
+          <label class="field"><span>Язык подсказок</span><select id="p-language"><option value="ru">Русский</option><option value="ky">Кыргызский</option></select></label>
+          <label class="field"><span>Буквы на экране</span><select id="p-lcd"><option value="lat">Латиница</option><option value="cyr">Кириллица</option></select></label>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- STEP 3 -->
+  <section id="tab-plan" class="app" style="padding:0" hidden>
+    <div id="plan-head"></div>
+    <div id="alerts" class="app" style="padding:0;gap:8px"></div>
+    <div class="card" id="today-card"><b>Каждый день</b><div id="timeline"></div></div>
+    <div class="card" id="box-card">
+      <b>Как разложить таблетницу</b>
+      <div class="box" id="box"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="card" id="tips-card"><b>Памятки</b><ul class="tips" id="tips"></ul></div>
+    <div class="card success" id="done" hidden></div>
+
+    <details class="dev" id="dev">
+      <summary>Для разработчика: экран, ИИ-проверка, JSON</summary>
+      <div class="dev-body">
+        <h3>Экран таблетницы</h3>
+        <div><div class="lcd"><div class="lcd-screen" id="lcd"></div></div></div>
+        <div class="row-btns"><button class="btn" id="dev-prev">←</button><button class="btn" id="dev-next">→</button><button class="btn" id="dev-play">▶ Мелодия</button></div>
+        <span class="small" id="dev-info"></span>
+        <h3>Сводка для родственника</h3>
+        <p class="small" id="sum-caregiver" style="margin:0"></p>
+        <div class="row-btns"><button class="btn" id="btn-ky">Перевести сводки на кыргызский (ИИ)</button></div>
+        <span class="small" id="ky-status"></span>
+        <h3>Проверка ИИ по системному промпту</h3>
+        <div class="row-btns"><button class="btn" id="btn-compare">Сравнить алгоритм и ИИ</button></div>
+        <span class="small" id="cmp-status"></span>
+        <div id="cmp"></div>
+        <details><summary class="small">Ответ ИИ целиком</summary><pre class="json" id="ai-raw"></pre></details>
+        <h3>Команды для таблетницы</h3>
+        <pre class="json" id="device-cmds"></pre>
+        <h3>JSON <button class="btn link" id="btn-copy">Копировать</button></h3>
+        <pre class="json" id="json"></pre>
+      </div>
+    </details>
+  </section>
+</div>
+<div class="sticky"><button class="btn primary" id="cta">Далее</button></div>
+
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const REL = {none:"не указано", before_food:"до еды", with_food:"во время еды", after_food:"после еды", empty_stomach:"натощак", bedtime:"на ночь", any:"в любое время", unknown:"неизвестно"};
+const SLOTS = ["morning","day","evening","night"];
+const SLOT_RU = {morning:"Утро", day:"День", evening:"Вечер", night:"Ночь"};
+const DAYS = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
+const GROUPS = ["антибиотик","пенициллины","фторхинолон","тетрациклин","сорбент","железо","кальций","антацид","левотироксин","пробиотик","ИПП","НПВС","давление","сахароснижающее"];
+
+/* Демо-справочник (drug_db). Не медицинская база. */
+const DB = {
+  amoxiclav:{name:"Амоксиклав", ingredient:"амоксициллин + клавулановая кислота", groups:["антибиотик","пенициллины"], food:"with_food", gap:0, maxMg:1750, tips:["Запивайте стаканом воды.","Не пейте алкоголь, пока идёт курс."], def:{dose:"875/125 мг", mg:875, n:2, interval:12, days:7}},
+  smecta:{name:"Смекта", ingredient:"смектит диоктаэдрический", groups:["сорбент"], food:"any", gap:0, pack:true, form:"порошок", tips:["Размешайте пакетик в половине стакана воды.","Другие лекарства пейте не ближе чем за 2 часа."], def:{dose:"1 пакетик 3 г", mg:3000, n:3, interval:"", days:5}},
+  sorbifer:{name:"Сорбифер Дурулес", ingredient:"железа сульфат + аскорбиновая кислота", groups:["железо"], food:"before_food", gap:30, tips:["Глотайте целиком и запивайте водой.","Не запивайте чаем, кофе или молоком."], def:{dose:"1 таблетка", mg:320, n:1, interval:"", days:30}},
+  ltiroxin:{name:"L-тироксин", ingredient:"левотироксин натрия", groups:["левотироксин"], food:"empty_stomach", gap:30, tips:["Утром натощак, запейте водой.","Завтракайте не раньше чем через 30 минут."], def:{dose:"50 мкг", mg:0.05, n:1, interval:"", days:90}},
+  calcium:{name:"Кальций-Д3", ingredient:"кальция карбонат + колекальциферол", groups:["кальций"], food:"with_food", gap:0, tips:["Разжуйте или рассосите таблетку."], def:{dose:"1 таблетка", mg:500, n:2, interval:"", days:30}},
+  omeprazole:{name:"Омепразол", ingredient:"омепразол", groups:["ИПП"], food:"before_food", gap:30, tips:["Капсулу глотайте целиком, не разжёвывайте."], def:{dose:"20 мг", mg:20, n:1, interval:"", days:14}},
+  linex:{name:"Линекс", ingredient:"пробиотик (лакто- и бифидобактерии)", groups:["пробиотик"], food:"after_food", gap:15, tips:["Не запивайте горячим."], def:{dose:"1 капсула", mg:0, n:3, interval:"", days:7}},
+  cipro:{name:"Ципрофлоксацин", ingredient:"ципрофлоксацин", groups:["антибиотик","фторхинолон"], food:"any", gap:0, maxMg:1500, elderly:"Пожилым нужен контроль врача: выше риск побочных эффектов.", kidney:"При болезнях почек дозу подбирает врач.", tips:["Запивайте водой, не молоком и не кефиром."], def:{dose:"500 мг", mg:500, n:2, interval:12, days:7}},
+  almagel:{name:"Альмагель", ingredient:"алюминия гидроксид + магния гидроксид", groups:["антацид"], food:"after_food", gap:60, pack:true, form:"суспензия", tips:["Взболтайте флакон перед приёмом.","Другие лекарства пейте не ближе чем за 2 часа."], def:{dose:"1 мерная ложка", mg:0, n:3, interval:"", days:10}},
+  metformin:{name:"Метформин", ingredient:"метформин", groups:["сахароснижающее"], food:"with_food", gap:0, maxMg:3000, kidney:"При болезнях почек нужен контроль врача.", tips:["Принимайте во время еды."], def:{dose:"500 мг", mg:500, n:2, interval:"", days:90}},
+  enalapril:{name:"Эналаприл", ingredient:"эналаприл", groups:["давление"], food:"any", gap:0, maxMg:40, elderly:"Пожилым дозу обычно начинают с меньшей — решает врач.", kidney:"При болезнях почек нужен контроль врача.", tips:["Принимайте каждый день в одно и то же время."], def:{dose:"10 мг", mg:10, n:1, interval:"", days:90}},
+  aspirin:{name:"Аспирин Кардио", ingredient:"ацетилсалициловая кислота", groups:["НПВС"], food:"before_food", gap:30, gi:true, tips:["Глотайте целиком и запивайте водой."], def:{dose:"100 мг", mg:100, n:1, interval:"", days:90}}
+};
+const FALLBACK_REL = [["левотироксин","empty_stomach"],["железо","before_food"],["сорбент","any"],["пробиотик","after_food"],["антацид","after_food"]];
+const FALLBACK_TIPS = {"железо":"Не запивайте чаем, кофе или молоком.","сорбент":"Другие лекарства пейте не ближе чем за 2 часа.","антацид":"Другие лекарства пейте не ближе чем за 2 часа.","фторхинолон":"Не запивайте молоком.","тетрациклин":"Не запивайте молоком.","левотироксин":"Пейте утром натощак, запивайте водой."};
+
+/* ---------- state ---------- */
+let uid = 1;
+const today = new Date(); const pad = n => String(n).padStart(2,"0");
+const iso = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const TODAY = iso(today);
+function drugFrom(key, over={}){
+  const db = DB[key]; const d = db ? db.def : {dose:"",mg:"",n:1,interval:"",days:7};
+  return Object.assign({id:uid++, key, name: db?db.name:"", ingredient: db?db.ingredient:"", groups: db?[...db.groups]:[], dose:d.dose, mg:d.mg, n:d.n, interval:d.interval, days:d.days, doctor:"none", start:TODAY}, over);
+}
+const EXAMPLE = () => [drugFrom("amoxiclav",{doctor:"with_food"}), drugFrom("smecta"), drugFrom("sorbifer")];
+const state = {
+  patient:{age:78, allergies:"сульфаниламиды", kidney:false, liver:false, stomach:true, language:"ru", fasting:false, lcd:"lat"},
+  routine:{wake_up:"07:00", breakfast:"08:00", lunch:"13:00", dinner:"19:00", sleep:"22:30", suhoor:"04:30", iftar:"18:45"},
+  drugs: EXAMPLE(), confirmed:false, result:null, devIdx:0, kyText:null
+};
+
+/* ---------- time utils ---------- */
+const toMin = s => { if(!s) return null; const [h,m]=s.split(":").map(Number); return h*60+m; };
+const norm = m => ((Math.round(m)%1440)+1440)%1440;
+const fmt = m => { const x = norm(m); return pad(Math.floor(x/60))+":"+pad(x%60); };
+const slotOf = m => { const x = norm(m); if (x>=300 && x<660) return "morning"; if (x>=660 && x<960) return "day"; if (x>=960 && x<1260) return "evening"; return "night"; };
+const addDays = (s,n) => { const d = new Date(s+"T00:00:00"); d.setDate(d.getDate()+n); return iso(d); };
+const wd = s => (new Date(s+"T00:00:00").getDay()+6)%7;
+const ruDate = s => { const d = new Date(s+"T00:00:00"); return d.toLocaleDateString("ru-RU",{day:"numeric",month:"long"}); };
+const sh = m => (m>0?"+":"−")+Math.floor(Math.abs(m)/60)+":"+pad(Math.abs(m)%60);
+
+/* ---------- interaction rules (раздел 4.6) ---------- */
+function gapRule(A,B){
+  const has=(g,x)=>g.includes(x), any=x=>has(A,x)||has(B,x);
+  const pair=(x,ys)=>(has(A,x)&&ys.some(y=>has(B,y)))||(has(B,x)&&ys.some(y=>has(A,y)));
+  let h=0, why="";
+  const up=(v,w)=>{ if(v>h){h=v;why=w;} };
+  if(any("сорбент")) up(2,"сорбент");
+  if(any("антацид")) up(2,"антацид");
+  if(pair("железо",["кальций","антацид","тетрациклин","фторхинолон"])) up(2,"железо");
+  if(pair("тетрациклин",["железо","кальций","антацид"])||pair("фторхинолон",["железо","кальций","антацид"])) up(2,"антибиотик и минералы");
+  if(pair("пробиотик",["антибиотик"])) up(2,"пробиотик и антибиотик");
+  if(pair("левотироксин",["железо","кальций"])) up(4,"левотироксин");
+  return {h,why};
+}
+
+/* ---------- algorithm (шаги 4.1–4.10) ---------- */
+const ALLERGY_ALIASES = [
+  [/бета.?лакт|beta.?lact|пеницил|penicil|амоксицил|amoxicil/, ["пенициллины"]],
+  [/фторхинол|fluoroquin|ципро|cipro|левофлок/, ["фторхинолон"]],
+  [/тетрацик|tetracyc|доксицик/, ["тетрациклин"]],
+  [/аспирин|aspirin|ацетилсалиц|нпвс|nsaid/, ["НПВС"]],
+  [/желез|iron/, ["железо"]]
+];
+const stems = s => String(s||"").toLowerCase().split(/[+,;()\/]| и /).map(x=>x.trim()).filter(x=>x.length>3).map(x=>x.split(/\s+/)[0].slice(0,7));
+function compute(st){
+  const P=st.patient, R=st.routine;
+  const out={status:"draft", missing_fields:[], blocked_rx_ids:[], schedule:[], device_map:[], course_end:{}, warnings:[], tips:[], summary_for_patient:"", summary_for_caregiver:"", requires_confirmation:true};
+  const seen=new Set();
+  const W=(code,ids,text,np)=>{ const key=code+"|"+[...new Set(ids)].sort().join(","); if(seen.has(key)) return; seen.add(key); out.warnings.push({code, rx_ids:[...new Set(ids)], text_for_user:text, needs_pharmacist:!!np}); };
+  // 4.1 — входные данные
+  const needR = P.fasting ? ["suhoor","iftar"] : ["wake_up","breakfast","lunch","dinner","sleep"];
+  needR.forEach(k=>{ if(!R[k]) out.missing_fields.push("routine."+k); });
+  let lo,hi,meals,mealList;
+  if(!out.missing_fields.length){
+    if(P.fasting){ lo=toMin(R.iftar); hi=toMin(R.suhoor); if(hi<=lo) hi+=1440; meals={iftar:lo, suhoor:hi}; mealList=[["ифтара",lo],["сухура",hi]]; }
+    else {
+      lo=toMin(R.wake_up); hi=toMin(R.sleep); if(hi<=lo) hi+=1440;                 // сон после полуночи
+      const fix=x=>x<lo?x+1440:x;
+      meals={b:fix(toMin(R.breakfast)), l:fix(toMin(R.lunch)), d:fix(toMin(R.dinner))};
+      if(!(lo<=meals.b && meals.b<meals.l && meals.l<meals.d && meals.d<=hi) || hi-lo<360 || hi-lo>1200 || meals.b-lo>300) out.missing_fields.push("routine.order");
+      mealList=[["завтрака",meals.b],["обеда",meals.l],["ужина",meals.d]];
+    }
+  }
+  if(!st.drugs.length) out.missing_fields.push("prescription");
+  st.drugs.forEach((d,i)=>{ const id="rx"+(i+1);
+    if(!(d.key!=="custom"||d.name.trim())) out.missing_fields.push(id+".name");
+    if(!(+d.n>0)) out.missing_fields.push(id+".times_per_day");
+    if(!(+d.days>0) && d.days!=="forever") out.missing_fields.push(id+".duration_days"); });
+  if(out.missing_fields.length){ out.status="need_input"; return {out, meds:[]}; }
+
+  const age=+P.age||0;
+  if(!age) W("unknown_age",[],"Возраст не указан — проверки для пожилых не выполнены. Укажите возраст на шаге «Мой день».",false);
+  const allergies=P.allergies.split(/[,;]/).map(s=>s.trim().toLowerCase()).filter(Boolean);
+  const weekEnd=addDays(TODAY,6);
+  const meds=[];
+  st.drugs.forEach((d,i)=>{
+    const id="rx"+(i+1), db=d.key!=="custom"?DB[d.key]:null;
+    const name=db?db.name:d.name.trim(), ingredient=(db?db.ingredient:d.ingredient)||name, groups=db?db.groups:d.groups;
+    const n=Math.min(6,Math.max(1,+d.n)), interval=+d.interval>0?+d.interval:null, mg=Math.max(0,+d.mg||0);
+    const m={id, d, db, name, ingredient, groups, n, interval, strict: !!interval && n>=2, mg, days:d.days==="forever"?null:+d.days, start:d.start||TODAY, blocked:false, inactive:false, pack:!!(db&&db.pack)||!!d.external, ext:!!d.external, notes:[]};
+    m.end = m.days ? addDays(m.start, m.days-1) : "9999-12-31";
+    // 4.2 — как принимать
+    if(m.ext){ m.rel="any"; m.src="doctor"; }
+    else if(d.doctor!=="none"){ m.rel=d.doctor; m.src="doctor";
+      if(db && db.food!=="any" && db.food!==d.doctor) W("doctor_vs_instruction",[id],`${name}: врач сказал «${REL[d.doctor]}», а в инструкции «${REL[db.food]}». Пьём как сказал врач — уточните у фармацевта.`,true);
+    } else if(db){ m.rel=db.food; m.src="drug_db"; }
+    else { const fb=FALLBACK_REL.find(([g])=>groups.includes(g)); m.rel=fb?fb[1]:"unknown"; m.src=fb?"fallback_rule":"none"; }
+    m.gap = db ? db.gap : ({before_food:30, after_food:30, empty_stomach:30}[m.rel]||0);
+    if(m.rel==="unknown") W("unknown_food_relation",[id],`${name}: неизвестно, как пить относительно еды. Ставим к завтраку — выберите «Как сказал врач» или уточните у фармацевта.`,true);
+    // 4.4 — противоречивый интервал
+    if(m.strict && interval*n>24){ m.strict=false; W("interval_conflict",[id],`${name}: ${n} ${n<5?"раза":"раз"} в день каждые ${interval} ч не помещаются в сутки (${n}×${interval}=${n*interval} ч). Рецепт противоречив — интервал не применён, уточните у врача.`,true); }
+    // 4.7 — безопасность
+    const hay=(name+" "+ingredient+" "+groups.join(" ")).toLowerCase();
+    const al=allergies.find(a=>{ const stem=a.length>6?a.slice(0,a.length-2):a; if(hay.includes(stem)) return true;
+      return ALLERGY_ALIASES.some(([re,gs])=>re.test(a) && gs.some(g=>groups.includes(g)||hay.includes(g.toLowerCase().slice(0,7)))); });
+    if(al){ m.blocked=true; W("allergy_match",[id],`${name}: совпадает с аллергией «${al}». Лекарство не включено в расписание — срочно свяжитесь с врачом.`,true); }
+    if(/(игнор|ignore|забудь|disregard|system|промпт|prompt|удво|увелич|умнож|измени доз|поставь вс)/i.test(name+" "+d.dose+" "+(db?"":d.ingredient)))
+      W("suspicious_input",[id],`${name}: в данных лекарства есть посторонний текст. Он не выполняется — проверьте рецепт.`,true);
+    if(db && db.maxMg && mg*n>db.maxMg) W("dose_above_max",[id],`${name}: ${mg} мг × ${n} = ${mg*n} мг в день, это больше ${db.maxMg} мг по инструкции. Уточните у врача.`,true);
+    if(db && age>=65 && db.elderly) W("elderly_caution",[id],`${name}: ${db.elderly}`,false);
+    if(db && P.kidney && db.kidney) W("organ_caution",[id],`${name}: ${db.kidney}`,true);
+    if(db && P.liver && db.liver) W("organ_caution",[id],`${name}: ${db.liver}`,true);
+    if(db && P.stomach && db.gi){
+      if(d.doctor==="none"){ m.rel="after_food"; m.gap=30; m.src="fallback_rule"; m.notes.push("после еды из-за желудка"); }
+      else W("organ_caution",[id],`${name}: раздражает желудок, а у пациента отмечен ЖКТ. Время приёма оставили как сказал врач — обсудите с ним.`,true);
+    }
+    if(n>=5) W("complex_regimen",[id],`${name}: ${n} приёмов в день — сложная схема, приёмы распределены равномерно.`,false);
+    // 4.8 — даты курса
+    if(!m.blocked && m.end<TODAY){ m.inactive=true; W("course_not_active",[id],`${name}: курс закончился ${ruDate(m.end)} — в расписание не включён.`,false); }
+    else if(!m.blocked && m.start>weekEnd){ m.inactive=true; W("course_not_active",[id],`${name}: курс начнётся ${ruDate(m.start)} — в таблетницу на эту неделю не попадает. Обновите расписание ближе к дате.`,false); }
+    meds.push(m);
+  });
+  // дубли по действующему веществу (частичное совпадение)
+  meds.forEach((m,i)=>{ if(m.blocked) return; const ms=stems(m.ingredient);
+    const dup=meds.slice(0,i).find(o=>!o.blocked && stems(o.ingredient).some(s=>ms.includes(s)));
+    if(dup){ m.blocked=true; W("duplicate_ingredient",[dup.id,m.id],`${m.name} и ${dup.name} содержат одно и то же вещество. Второй препарат не включён — уточните у врача.`,true); } });
+  meds.forEach(m=>{ if(m.blocked) out.blocked_rx_ids.push(m.id); });
+  const active=meds.filter(m=>!m.blocked && !m.inactive);
+  if(!active.length){ out.status="blocked"; return {out, meds}; }
+
+  // 4.3 — якоря к еде
+  const fast=P.fasting;
+  const off=(m,meal,rel)=>({before_food:meal-m.gap, with_food:meal, after_food:meal+m.gap, empty_stomach:meal-Math.max(m.gap,30), bedtime:meal, any:meal, unknown:meal}[rel||m.rel]);
+  active.forEach(m=>{
+    let t=[], rels=null;
+    if(fast){
+      if(m.n===1) t=[m.rel==="empty_stomach"||m.rel==="before_food"?off(m,meals.suhoor):off(m,meals.iftar)];
+      else if(m.n===2) t=[off(m,meals.iftar), off(m,meals.suhoor)];
+      else { for(let k=0;k<m.n;k++) t.push(lo+Math.round((hi-lo)*k/(m.n-1)/15)*15);
+        W("fasting_conflict",[m.id],`${m.name}: ${m.n} приёма в день во время поста — часть приходится на ночь. Решение о схеме принимает врач.`,true); }
+      if(m.rel==="bedtime"){ t[t.length-1]=hi-30; }
+    } else {
+      if(m.rel==="bedtime"){                                           // «перед сном» — последний приём = сон − 30 мин
+        const base = m.n===1?[]:m.n===2?[meals.b]:m.n===3?[meals.b,meals.l]:m.n===4?[meals.b,meals.l,meals.d]:null;
+        if(base){ t=[...base, hi-30]; rels=[...base.map(()=>"any"),"bedtime"]; }
+        else { const a=lo+30,b=hi-30; for(let k=0;k<m.n;k++) t.push(a+Math.round((b-a)*k/(m.n-1)/15)*15); rels=t.map((_,k)=>k===m.n-1?"bedtime":"any"); }
+      }
+      else if(m.n===1) t=[off(m,meals.b)];
+      else if(m.n===2) t=[off(m,meals.b), off(m,meals.d)];
+      else if(m.n===3) t=[off(m,meals.b), off(m,meals.l), off(m,meals.d)];
+      else if(m.n===4) t=[off(m,meals.b), off(m,meals.l), off(m,meals.d), hi-30];
+      else { const a=lo+30,b=hi-30; for(let k=0;k<m.n;k++) t.push(a+Math.round((b-a)*k/(m.n-1)/15)*15); }
+      if(m.rel==="empty_stomach" && t[0]<lo) t[0]=lo;
+    }
+    // 4.4 — строгий интервал с допуском ±1 ч
+    m.own = m.n>=5?90:120;
+    if(m.strict){
+      const I=m.interval*60;
+      const bad=t.some((x,k)=>k>0 && Math.abs((x-t[k-1])-I)>60);
+      if(bad && fast){
+        W("fasting_conflict",[m.id],`${m.name}: интервал ${m.interval} ч не помещается между ифтаром и сухуром. Дневной приём во время поста не ставим — схему на время поста решает врач.`,true);
+      } else if(bad){
+        let sp=I; if((m.n-1)*sp>hi-lo) sp=Math.max(I-60, Math.floor((hi-lo)/(m.n-1)/15)*15);
+        let s0=Math.max(lo, Math.min(t[0], hi-(m.n-1)*sp));
+        t=t.map((_,k)=>s0+k*sp); rels=null;
+        const outside=t.some(x=>x<lo||x>hi);
+        W("interval_vs_meal",[m.id],`${m.name}: строгий интервал ${m.interval} ч важнее привязки к еде — время подстроено под интервал`+(sp!==I?` (шаг ${Math.floor(sp/60)} ч ${sp%60?sp%60+" мин":""}, в пределах допуска ±1 ч)`:"")+(outside?". Часть приёмов приходится на ночь.":"."),outside);
+      }
+      m.own = Math.max(60, Math.min(...t.slice(1).map((x,k)=>x-t[k]), I) - 60);
+    }
+    m.ideal=t; m.rels=rels;
+  });
+
+  // 4.5 — разнесение несовместимых
+  const rank=m=>m.strict?0:({empty_stomach:1,before_food:2,with_food:3,after_food:4}[m.rel]??5);
+  const order=[...active].sort((a,b)=>rank(a)-rank(b)||b.n-a.n);
+  const placed=[];
+  const blockers=(m,t)=>{ const bl=[];
+    placed.forEach(p=>{ if(p.m===m){ if(Math.abs(t-p.t)<m.own) bl.push(p.m); return; }
+      const g=gapRule(m.groups,p.m.groups).h; if(g>0 && Math.abs(t-p.t)<g*60) bl.push(p.m); });
+    return bl; };
+  order.forEach(m=>{
+    m.doses=[];
+    m.ideal.forEach((t0,k)=>{
+      const night = t0<lo || t0>hi;
+      let t=t0, moved=0;
+      const bl0=blockers(m,t0), others=[...new Set(bl0.filter(x=>x!==m))];
+      if(bl0.length && !m.strict){
+        let found=null;
+        for(let s=15;s<=1440 && found===null;s+=15){
+          for(const c of [t0+s,t0-s]){ if(c<lo||c>hi) continue; if(!blockers(m,c).length){ found=c; break; } }
+        }
+        if(found!==null){ t=found; moved=found-t0; }
+        else W("unresolved_conflict",[m.id,...others.map(x=>x.id)],`${m.name}: не удалось развести с ${others.map(x=>x.name).join(", ")||"собственными приёмами"} внутри дня. Нужна консультация фармацевта.`,true);
+      } else if(bl0.length && m.strict){
+        W("unresolved_conflict",[m.id,...others.map(x=>x.id)],`${m.name}: строгий интервал не даёт развести с ${others.map(x=>x.name).join(", ")||"собственными приёмами"}. Нужна консультация фармацевта.`,true);
+      }
+      const dose={m,t,moved,night,rel:(m.rels&&m.rels[k])||m.rel,why:moved?others.map(x=>x.name):[]};
+      // после сдвига — заново проверить связь с едой (шаг 4.3)
+      if((moved || (!fast && m.n>=5)) && ["before_food","with_food","after_food","empty_stomach"].includes(dose.rel)){
+        const [mn,mt]=mealList.reduce((b,x)=>Math.abs(t-x[1])<Math.abs(t-b[1])?x:b);
+        const df=t-mt, hm=x=>`${Math.floor(Math.abs(x)/60)?Math.floor(Math.abs(x)/60)+" ч ":""}${Math.abs(x)%60?Math.abs(x)%60+" мин":""}`.trim();
+        const eff = Math.abs(df)<=15?"with_food": df<0&&df>=-90?"before_food": df>0&&df<=150?"after_food":"any";
+        dose.foodText = Math.abs(df)<=15?`во время ${mn}`: df<0?`за ${hm(df)} до ${mn}`:`через ${hm(df)} после ${mn}`;
+        if(eff!==dose.rel && !moved){ dose.rel=eff; }
+        else if(eff!==dose.rel){
+          W("food_shifted",[m.id],`${m.name} в ${fmt(t)}: чтобы развести с ${dose.why.join(", ")}, приём сдвинут и уже не «${REL[dose.rel]}» (сейчас ${dose.foodText}). Уточните у фармацевта, допустимо ли это.`, dose.rel==="empty_stomach"||dose.rel==="before_food");
+          dose.rel=eff;
+        }
+      }
+      placed.push(dose); m.doses.push(dose);
+    });
+  });
+
+  // 4.8 — сигналы и отделения
+  const map=new Map();
+  placed.forEach(p=>{ const key=norm(p.t); if(!map.has(key)) map.set(key,[]); map.get(key).push(p); });
+  const startOf = fast ? lo : 300;
+  const sortKey=k=>(norm(k)-startOf+1440)%1440;
+  const entries=[...map.entries()].sort((a,b)=>sortKey(a[0])-sortKey(b[0])).map(([t,ps])=>({t, slot:slotOf(t), ps}));
+  const firstInSlot={};
+  entries.forEach(e=>{ if(!(e.slot in firstInSlot)) firstInSlot[e.slot]=e.t;
+    e.late = Math.abs(sortKey(e.t)-sortKey(firstInSlot[e.slot]))>30; });
+  const PRI={empty_stomach:0,bedtime:0,before_food:1,with_food:2,after_food:3,any:4,unknown:4};
+  const MEL={empty_stomach:3,bedtime:3,before_food:0,with_food:1,after_food:2,any:1,unknown:1};
+  const L2={lat:{empty_stomach:"EMPTY STOMACH",bedtime:"NA NOCH",before_food:"BEFORE FOOD",with_food:"WITH FOOD",after_food:"AFTER FOOD",any:"ANY TIME",unknown:"ASK PHARMACIST"},
+            cyr:{empty_stomach:"НАТОЩАК",bedtime:"НА НОЧЬ",before_food:"ДО ЕДЫ",with_food:"ВО ВРЕМЯ ЕДЫ",after_food:"ПОСЛЕ ЕДЫ",any:"В ЛЮБОЕ ВРЕМЯ",unknown:"СПРОСИТЕ ВРАЧА"}};
+  const lcdMode=P.lcd==="cyr"?"cyr":"lat";
+  entries.forEach(e=>{
+    const main=e.ps.map(p=>p.rel).sort((a,b)=>PRI[a]-PRI[b])[0];
+    const allExt=e.ps.every(p=>p.m.ext);
+    e.melody=MEL[main];
+    e.lcd={line1: allExt ? (lcdMode==="cyr"?"НАНЕСИТЕ!":"APPLY!") : (lcdMode==="cyr"?"ПРИМИТЕ!":"TAKE PILLS!"), line2:L2[lcdMode][main]};
+    e.items=e.ps.map(p=>({rx_id:p.m.id, name:p.m.name, dose:p.m.d.dose, food_relation:p.rel, keep_in_pack:p.m.pack||e.late, night_dose:p.night, source:p.m.src, _moved:p.moved, _why:p.why, _food:p.foodText, _ext:p.m.ext, _form:p.m.db&&p.m.db.form}));
+  });
+  out.schedule=entries.map(e=>({time:fmt(e.t), slot:e.slot, melody:e.melody, lcd:e.lcd, items:e.items.map(({_moved,_why,_form,_food,_ext,...r})=>r)}));
+
+  // курс и раскладка по дням (неделя от сегодняшнего дня или от начала курса)
+  meds.filter(m=>!m.blocked).forEach(m=>{ out.course_end[m.id]= m.days ? m.end : "ongoing"; });
+  const earliest=active.map(m=>m.start).sort()[0];
+  const fillStart= earliest>TODAY ? earliest : TODAY;
+  const week=[...Array(7)].map((_,k)=>addDays(fillStart,k));
+  const cols=week.map(date=>({date, day:wd(date)})).sort((a,b)=>a.day-b.day);
+  const dm=[];
+  cols.forEach(c=>{ SLOTS.forEach(s=>{
+    const es=entries.filter(e=>e.slot===s);
+    const inSlot=[], fromPack=[], alarms=[], ids=[];
+    es.forEach(e=>{ let any=false; e.items.forEach(it=>{ const m=active.find(x=>x.id===it.rx_id);
+      if(c.date<m.start || c.date>m.end) return; any=true;
+      (it.keep_in_pack?fromPack:inSlot).push(it.name); if(!it.keep_in_pack) ids.push(it.rx_id); }); if(any) alarms.push(fmt(e.t)); });
+    if(alarms.length) dm.push({day:c.day, date:c.date, slot:s, rx_ids:[...new Set(ids)], alarms, _in:[...new Set(inSlot)], _pack:[...new Set(fromPack)]});
+  }); });
+  out.device_map=dm.map(({_in,_pack,...r})=>r);
+
+  // 4.10 — памятки
+  active.forEach(m=>{ const arr=m.db?[...m.db.tips]:[...new Set(m.groups.map(g=>FALLBACK_TIPS[g]).filter(Boolean))];
+    if(m.notes.length) arr.unshift("Принимайте "+m.notes.join(", ")+"."); if(m.ext) arr.unshift("Наносите наружно, в таблетницу не кладите.");
+    arr.slice(0,2).forEach(t=>out.tips.push({rx_id:m.id, text:t})); });
+
+  // сводки
+  const lines=entries.map(e=>`${fmt(e.t)} — ${e.items.map(it=>it.name+(it.food_relation!=="any"?" ("+REL[it.food_relation]+")":"")).join(", ")}`);
+  const packNames=[...new Set(entries.flatMap(e=>e.items.filter(it=>it.keep_in_pack).map(it=>it.name)))];
+  const ends=active.filter(m=>m.days).map(m=>({m,end:m.end})).sort((a,b)=>a.end<b.end?-1:1);
+  const endTxt = ends.length ? `Курс ${ends[0].m.name} закончится ${ruDate(ends[0].end)}.` : "Все лекарства — постоянный приём.";
+  out.summary_for_patient=`Ваше расписание: ${lines.join("; ")}. Таблетница подаст сигнал и покажет подсказку на экране.`+(packNames.length?` ${packNames.join(", ")} берите из упаковки рядом с таблетницей.`:"")+" "+endTxt;
+  const npc=out.warnings.filter(w=>w.needs_pharmacist).length;
+  out.summary_for_caregiver=`${placed.length} приёмов в день, ${entries.length} сигналов. ${endTxt} `+(out.warnings.length?`Предупреждений: ${out.warnings.length}${npc?`, из них ${npc} нужно обсудить с фармацевтом`:""}.`:"Предупреждений нет.")+" Вы получите уведомление после каждого приёма или при пропуске.";
+  return {out, meds, entries, cols, dm, fillStart, lo, hi};
+}
+
+/* ---------- melody (WebAudio) ---------- */
+const MELODIES = {0:[[660,.14],[880,.14],[660,.14],[880,.22]], 1:[[523,.18],[659,.18],[784,.32]], 2:[[784,.18],[659,.18],[523,.32]], 3:[[440,.35],[0,.1],[440,.35]]};
+let actx=null;
+function play(code){ try{ actx = actx || new (window.AudioContext||window.webkitAudioContext)(); let t=actx.currentTime+.02;
+  (MELODIES[code]||MELODIES[1]).forEach(([f,d])=>{ if(f){ const o=actx.createOscillator(), g=actx.createGain(); o.type="square"; o.frequency.value=f; g.gain.setValueAtTime(.06,t); g.gain.exponentialRampToValueAtTime(.001,t+d); o.connect(g).connect(actx.destination); o.start(t); o.stop(t+d); } t+=d+.04; }); }catch(e){} }
+
+
+/* ---------- UI state ---------- */
+state.tab = "meds"; state.editing = null; state.devIdx = 0;
+const COLORS = ["#d94f70","#2f80c4","#d38a17","#2c9a6a","#7b5cc4","#c4602f","#1f9bb0","#8a8f2a"];
+const colorOf = i => i<COLORS.length ? COLORS[i] : `hsl(${(i*67)%360} 55% 48%)`;
+const HOW = {before_food:"до еды", with_food:"во время еды", after_food:"после еды", empty_stomach:"натощак", bedtime:"перед сном", any:"в любое время", unknown:"уточните у фармацевта", none:"как в инструкции"};
+const plural = (n,a,b,c) => { const m=n%10, h=n%100; return (m===1&&h!==11)?a:(m>=2&&m<=4&&(h<10||h>=20))?b:c; };
+const timesTxt = n => `${n} ${plural(n,"раз","раза","раз")} в день`;
+const daysTxt = n => `${n} ${plural(n,"день","дня","дней")}`;
+
+/* ---------- step 1: medicines ---------- */
+function medName(d){ return d.key!=="custom" ? DB[d.key].name : (d.name||"Новое лекарство"); }
+function medCard(d,i){
+  const blocked = state.result && state.result.out.blocked_rx_ids.includes("rx"+(i+1));
+  if(state.editing!==d.id){
+    const rel = d.doctor!=="none" ? HOW[d.doctor] : (d.key!=="custom" ? HOW[DB[d.key].food] : "как принимать — не указано");
+    return `<div class="card"><button class="med" data-edit="${d.id}">
+      <i class="dot" style="background:${colorOf(i)}"></i>
+      <span class="med-main"><b>${esc(medName(d))}</b><span>${esc(d.dose)} · ${timesTxt(+d.n||1)} · ${d.days==="forever"?"постоянно":d.days?daysTxt(+d.days):`<span class="blocked-note">укажите, сколько дней</span>`}<br>${esc(d.external?"наружно — не в таблетницу":rel)}</span>
+      ${blocked?`<span class="blocked-note">Не включено — см. предупреждение</span>`:""}</span>
+      <span class="edit-hint">Изменить</span></button></div>`;
+  }
+  const opts = Object.entries(DB).map(([k,v])=>`<option value="${k}" ${d.key===k?"selected":""}>${esc(v.name)}</option>`).join("")+`<option value="custom" ${d.key==="custom"?"selected":""}>Другое лекарство</option>`;
+  const segN = [1,2,3,4,5,6].map(n=>`<button type="button" data-set="n" data-v="${n}" aria-pressed="${+d.n===n}" class="${+d.n===n?"on":""}">${n}</button>`).join("");
+  const segH = ["none","before_food","with_food","after_food","empty_stomach","bedtime","any"].map(k=>`<button type="button" data-set="doctor" data-v="${k}" aria-pressed="${d.doctor===k}" class="${d.doctor===k?"on":""}">${HOW[k]}</button>`).join("");
+  return `<div class="card" data-form="${d.id}">
+    <label class="field"><span>Лекарство</span><select data-f="key">${opts}</select></label>
+    ${d.key==="custom"?`<label class="field"><span>Название</span><input data-f="name" value="${esc(d.name)}" placeholder="как в рецепте"></label>
+    <label class="field"><span>Действующее вещество</span><input data-f="ingredient" value="${esc(d.ingredient)}" placeholder="есть на упаковке, например «амоксициллин»"></label>`:""}
+    <div class="field"><span>Сколько раз в день</span><div class="seg">${segN}</div></div>
+    <div class="two">
+      <label class="field"><span>Сколько дней</span><input type="number" min="1" data-f="days" value="${d.days==="forever"?"":esc(d.days)}" ${d.days==="forever"?"disabled placeholder=\"постоянно\"":"placeholder=\"например, 7\""}></label>
+      <label class="field"><span>Начать с</span><input type="date" data-f="start" value="${esc(d.start)}"></label>
+    </div>
+    <div class="checks"><label><input type="checkbox" data-flag="forever" ${d.days==="forever"?"checked":""}> Принимать постоянно</label>
+      <label><input type="checkbox" data-flag="external" ${d.external?"checked":""}> Наружное (мазь, раствор)</label></div>
+    <div class="field"><span>Как сказал врач</span><div class="seg">${segH}</div></div>
+    <details class="more"><summary>Доза и интервал</summary>
+      <div class="two">
+        <label class="field"><span>Доза</span><input data-f="dose" value="${esc(d.dose)}"></label>
+        <label class="field"><span>мг за приём</span><input type="number" data-f="mg" value="${esc(d.mg)}"></label>
+      </div>
+      <label class="field" style="margin-top:10px"><span>Строго каждые … часов</span><input type="number" min="0" data-f="interval" value="${esc(d.interval)}" placeholder="если врач так написал"></label>
+    </details>
+    <div class="form-actions"><button class="btn del" data-del="${d.id}">Удалить</button><button class="btn primary" data-done>Готово</button></div>
+  </div>`;
+}
+function renderMeds(){
+  $("#med-list").innerHTML = state.drugs.length ? state.drugs.map(medCard).join("") : `<div class="card"><p class="lead" style="margin:0">Пока пусто. Добавьте первое лекарство.</p></div>`;
+}
+$("#med-list").addEventListener("click", e=>{
+  const ed=e.target.closest("[data-edit]"); if(ed){ state.editing=+ed.dataset.edit; renderMeds(); return; }
+  const form=e.target.closest("[data-form]"); if(!form) return;
+  const d=state.drugs.find(x=>x.id===+form.dataset.form);
+  const set=e.target.closest("[data-set]"); if(set){ d[set.dataset.set]=set.dataset.set==="n"?+set.dataset.v:set.dataset.v; form.querySelectorAll(`[data-set="${set.dataset.set}"]`).forEach(b=>{ b.classList.toggle("on",b===set); b.setAttribute("aria-pressed",b===set); }); changed(); return; }
+  if(e.target.closest("[data-done]")){ state.editing=null; renderMeds(); return; }
+  const del=e.target.closest("[data-del]"); if(del){ state.drugs=state.drugs.filter(x=>x.id!==d.id); state.editing=null; renderMeds(); changed(); }
+});
+$("#med-list").addEventListener("change", e=>{ const fl=e.target.dataset.flag; if(!fl) return; const form=e.target.closest("[data-form]"); const d=state.drugs.find(x=>x.id===+form.dataset.form);
+  if(fl==="forever") d.days=e.target.checked?"forever":""; else d.external=e.target.checked; renderMeds(); changed(); });
+$("#med-list").addEventListener("input", e=>{
+  const form=e.target.closest("[data-form]"); const f=e.target.dataset.f; if(!form||!f) return;
+  const d=state.drugs.find(x=>x.id===+form.dataset.form);
+  if(f==="key"){ Object.assign(d, drugFrom(e.target.value,{id:d.id,start:d.start})); renderMeds(); changed(); return; }
+  d[f]=e.target.value; changed();
+});
+$("#btn-add").onclick=()=>{ const d=drugFrom("custom",{dose:"1 таблетка",n:1,days:7}); state.drugs.push(d); state.editing=d.id; renderMeds(); changed();
+  setTimeout(()=>{ const s=document.querySelector(`[data-form="${d.id}"] select`); if(s){ s.focus(); s.scrollIntoView({block:"center",behavior:"smooth"}); } },30); };
+$("#ai-open").onclick=()=>{ $("#ai-box").hidden=!$("#ai-box").hidden; if(!$("#ai-box").hidden) $("#rx-text").focus(); };
+
+/* ---------- step 2: day ---------- */
+function syncDay(){
+  Object.keys(state.routine).forEach(k=>{ const el=$("#r-"+k); if(el) el.value=state.routine[k]||""; });
+  $("#p-age").value=state.patient.age; $("#p-allergies").value=state.patient.allergies;
+  $("#p-language").value=state.patient.language; $("#p-lcd").value=state.patient.lcd;
+  ["kidney","liver","stomach","fasting"].forEach(k=>$("#p-"+k).checked=state.patient[k]);
+  $("#fast-rows").hidden=!state.patient.fasting;
+}
+document.querySelectorAll("[data-r]").forEach(el=>el.addEventListener("input",()=>{ state.routine[el.dataset.r]=el.value; changed(); }));
+$("#p-age").oninput=e=>{ state.patient.age=e.target.value; changed(); };
+$("#p-allergies").oninput=e=>{ state.patient.allergies=e.target.value; changed(); };
+$("#p-language").onchange=e=>{ state.patient.language=e.target.value; changed(); };
+$("#p-lcd").onchange=e=>{ state.patient.lcd=e.target.value; changed(); };
+["kidney","liver","stomach"].forEach(k=>$("#p-"+k).onchange=e=>{ state.patient[k]=e.target.checked; changed(); });
+$("#p-fasting").onchange=e=>{ state.patient.fasting=e.target.checked; $("#fast-rows").hidden=!e.target.checked; changed(); };
+
+/* ---------- step 3: plan ---------- */
+const MISSING_RU = f => f.startsWith("routine.") ? ({wake_up:"время подъёма",breakfast:"завтрак",lunch:"обед",dinner:"ужин",sleep:"время сна",suhoor:"сухур",iftar:"ифтар",order:"порядок времени: подъём → завтрак → обед → ужин → сон (сон может быть после полуночи)"}[f.split(".")[1]]) :
+  f==="prescription" ? "хотя бы одно лекарство" : (()=>{ const [rx,k]=f.split("."); const d=state.drugs[+rx.slice(2)-1]; return `${d?medName(d):rx}: ${({name:"название",times_per_day:"сколько раз в день",duration_days:"сколько дней принимать (или «постоянно»)"}[k])}`; })();
+function goFix(f){
+  if(!f) return;
+  if(f.startsWith("routine.")){ setTab("day"); const el=$("#r-"+f.split(".")[1]); if(el) setTimeout(()=>el.focus(),50); return; }
+  if(f==="prescription"){ setTab("meds"); return; }
+  const d=state.drugs[+f.split(".")[0].slice(2)-1]; state.editing=d.id; renderMeds(); setTab("meds");
+  setTimeout(()=>{ const el=document.querySelector(`[data-form="${d.id}"] [data-f="days"]`)||document.querySelector(`[data-form="${d.id}"]`); if(el){ el.scrollIntoView({block:"center"}); if(el.focus) el.focus(); } },60);
+}
+$("#plan-head").addEventListener("click", e=>{ const b=e.target.closest("[data-fix]"); if(b) goFix(b.dataset.fix); });
+function renderPlan(){
+  const {out, entries=[], cols=[], dm=[], meds=[]} = state.result;
+  const idxOf = id => +id.slice(2)-1;
+  if(out.status==="need_input"){
+    $("#plan-head").innerHTML=`<h1>Не хватает данных</h1><p class="lead">Без этого нельзя посчитать, в какие дни класть лекарства в таблетницу. Нажмите на строку, чтобы исправить.</p>
+      <div class="card" style="margin-top:12px;gap:0">${out.missing_fields.map(f=>`<button class="med" style="padding:10px 0;border-top:1px solid var(--line)" data-fix="${esc(f)}"><span class="med-main"><b style="font-size:16px">${esc(MISSING_RU(f))}</b></span><span class="edit-hint">Исправить →</span></button>`).join("")}</div>`;
+  } else if(out.status==="blocked"){
+    $("#plan-head").innerHTML=`<h1>Сейчас нечего класть в таблетницу</h1><p class="lead">Лекарства заблокированы или их курс не на этой неделе — причины ниже.</p>`;
+  } else {
+    const next=entries[0];
+    $("#plan-head").innerHTML=`<h1>${entries.length} ${plural(entries.length,"сигнал","сигнала","сигналов")} в день</h1><p class="lead">Первый — в ${fmt(next.t)}. Проверьте расписание и подтвердите, чтобы отправить его на таблетницу.</p>`;
+  }
+  // alerts
+  const crit=out.warnings.filter(w=>w.needs_pharmacist), soft=out.warnings.filter(w=>!w.needs_pharmacist);
+  $("#alerts").innerHTML = crit.map(w=>`<div class="alert crit"><b>Уточните у врача</b><p>${esc(w.text_for_user)}</p></div>`).join("")
+    + soft.map(w=>`<div class="alert warn"><b>Обратите внимание</b><p>${esc(w.text_for_user)}</p></div>`).join("");
+  const has = out.status==="draft";
+  ["#today-card","#box-card","#tips-card"].forEach(s=>$(s).hidden=!has);
+  if(!has){ $("#done").hidden=true; return; }
+  // timeline
+  $("#timeline").innerHTML = entries.map(e=>`<div class="dose">
+    <div><div class="dose-time">${fmt(e.t)}</div><span class="slot s-${e.slot}">${SLOT_RU[e.slot]}</span></div>
+    <div>${e.items.map(it=>`<div class="pill-line"><i class="dot" style="background:${colorOf(idxOf(it.rx_id))}"></i><div><b>${esc(it.name)}</b> <span class="how">· ${esc(it.dose)}</span><div class="how">${it._ext?"наносить наружно":it._food?esc(it._food):HOW[it.food_relation]}${it._moved?` · отдельно от ${esc(it._why.join(", "))}`:""}${it.night_dose?" · ночной приём":""}</div>${it.keep_in_pack?`<div class="pack">Взять из упаковки, не из ячейки</div>`:""}</div></div>`).join("")}</div>
+  </div>`).join("");
+  // pillbox grid
+  const startDay = -1;
+  let bh = `<div></div>` + cols.map(c=>`<div class="hd ${c.day===startDay?"today":""}">${DAYS[c.day]}<br><span style="font-weight:400">${new Date(c.date+"T00:00:00").getDate()}</span>${c.date===state.result.fillStart?`<br><span style="font-size:10px">старт</span>`:""}</div>`).join("");
+  SLOTS.forEach(s=>{ bh += `<div class="rl">${SLOT_RU[s]}</div>`;
+    cols.forEach(c=>{ const cell=dm.find(x=>x.day===c.day && x.slot===s);
+      const dots = cell ? meds.filter(m=>!m.blocked).map(m=>{ const i=idxOf(m.id); const inn=cell._in.includes(m.name), pk=cell._pack.includes(m.name);
+        return inn?`<i style="background:${colorOf(i)}" title="${esc(m.name)}"></i>`:pk?`<i class="pk" style="color:${colorOf(i)}" title="${esc(m.name)} — из упаковки"></i>`:""; }).join("") : "";
+      bh += `<div class="cell" title="${cell?cell.alarms.join(", "):""}">${dots}</div>`; }); });
+  $("#box").innerHTML = bh;
+  $("#legend").innerHTML = meds.filter(m=>!m.blocked).map(m=>`<span><i class="dot" style="margin:0;background:${colorOf(idxOf(m.id))}"></i>${esc(m.name)}</span>`).join("") + `<span><i class="ring"></i>из упаковки</span>`;
+  // tips (one line per medicine)
+  const byRx={}; out.tips.forEach(t=>{ (byRx[t.rx_id]=byRx[t.rx_id]||[]).push(t.text); });
+  $("#tips").innerHTML = Object.entries(byRx).map(([id,arr])=>`<li><b>${esc((meds.find(m=>m.id===id)||{}).name)}:</b> ${esc(arr.join(" "))}</li>`).join("");
+  // done
+  $("#done").hidden = !state.confirmed;
+  if(state.confirmed){ const ky=state.patient.language==="ky"&&state.kyText;
+    $("#done").innerHTML=`<div class="big">✓</div><h1 style="margin:0">Таблетница настроена</h1><p class="lead" style="margin:0">Ближайший сигнал в ${fmt(entries[0].t)}. Близкие получат уведомление после каждого приёма или если приём пропущен.</p><p class="small" style="margin:0">${esc(ky?state.kyText.caregiver:out.summary_for_caregiver)}</p>`; }
+  renderDev();
+}
+
+/* ---------- developer panel ---------- */
+function lcdLine(s){ const t=(s||"").slice(0,16).padEnd(16," "); return `<div class="lcd-line">${[...t].map(c=>`<span>${c===" "?"&nbsp;":esc(c)}</span>`).join("")}</div>`; }
+function renderDev(){
+  const {out, entries=[]} = state.result;
+  if(state.devIdx>=entries.length) state.devIdx=0;
+  const e=entries[state.devIdx];
+  $("#lcd").innerHTML = e ? lcdLine(e.lcd.line1)+lcdLine(e.lcd.line2) : lcdLine("SMART PILLBOX")+lcdLine("NO SCHEDULE");
+  $("#dev-info").textContent = e ? `Сигнал ${state.devIdx+1} из ${entries.length} · мелодия ${e.melody}` : "";
+  const ky=state.patient.language==="ky"&&state.kyText;
+  $("#sum-caregiver").textContent = ky ? state.kyText.caregiver : out.summary_for_caregiver;
+  const cmds=["CLEAR"]; out.device_map.forEach(c=>c.alarms.forEach(a=>{ const s=out.schedule.find(x=>x.time===a); cmds.push(`SET ${c.date} D${c.day} S${SLOTS.indexOf(c.slot)} ${a} M${s.melody} "${s.lcd.line1}" "${s.lcd.line2}"`); })); cmds.push("SAVE");
+  $("#device-cmds").textContent = cmds.join("\n");
+  const j=JSON.parse(JSON.stringify(out)); if(ky){ j.summary_for_patient=state.kyText.patient; j.summary_for_caregiver=state.kyText.caregiver; }
+  $("#json").textContent = JSON.stringify(j,null,2);
+}
+$("#dev-prev").onclick=()=>{ const n=state.result.entries?.length||0; if(n){ state.devIdx=(state.devIdx-1+n)%n; renderDev(); } };
+$("#dev-next").onclick=()=>{ const n=state.result.entries?.length||0; if(n){ state.devIdx=(state.devIdx+1)%n; renderDev(); } };
+$("#dev-play").onclick=()=>{ const e=state.result.entries?.[state.devIdx]; if(e) play(e.melody); };
+$("#btn-copy").onclick=async()=>{ try{ await navigator.clipboard.writeText($("#json").textContent); $("#btn-copy").textContent="Скопировано"; }catch(e){ $("#btn-copy").textContent="Выделите вручную"; } setTimeout(()=>$("#btn-copy").textContent="Копировать",1600); };
+
+/* ---------- navigation ---------- */
+function stepStatus(){
+  const {out}=state.result;
+  $("#st-meds").textContent = state.drugs.length ? `${state.drugs.length} шт.` : "пусто";
+  $("#st-day").textContent = out.missing_fields.some(f=>f.startsWith("routine")) ? "заполнить" : "готово";
+  $("#st-plan").textContent = state.confirmed ? "отправлено" : out.status==="draft" ? "проверить" : out.status==="blocked" ? "нужен врач" : "заполнить";
+}
+function setTab(t){ state.tab=t;
+  ["meds","day","plan"].forEach(x=>$("#tab-"+x).hidden=x!==t);
+  document.querySelectorAll("#steps button").forEach(b=>b.classList.toggle("on",b.dataset.tab===t));
+  updateCta(); window.scrollTo({top:0}); }
+function updateCta(){
+  const c=$("#cta"), st=state.result.out.status;
+  if(state.tab==="meds"){ c.textContent="Далее: мой день"; c.disabled=!state.drugs.length; }
+  else if(state.tab==="day"){ c.textContent="Составить расписание"; c.disabled=false; }
+  else if(st==="need_input"){ c.textContent="Заполнить недостающее"; c.disabled=false; }
+  else { c.textContent = state.confirmed ? "Изменить назначения" : "Подтвердить и отправить на таблетницу"; c.disabled = !state.confirmed && st!=="draft"; }
+}
+$("#cta").onclick=()=>{
+  if(state.tab==="meds") return setTab("day");
+  if(state.tab==="day") return setTab("plan");
+  if(state.result.out.status==="need_input") return goFix(state.result.out.missing_fields[0]);
+  if(state.confirmed){ state.confirmed=false; render(); return setTab("meds"); }
+  state.confirmed=true; render(); $("#done").scrollIntoView({behavior:"smooth",block:"center"});
+};
+document.querySelectorAll("#steps button").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+
+function render(){ state.result=compute(state); stepStatus(); renderPlan(); updateCta(); }
+let tmr=null; function changed(){ state.confirmed=false; state.kyText=null; clearTimeout(tmr); tmr=setTimeout(render,120); }
+
+/* ---------- AI (через свой сервер /api/ai, ключ хранится на сервере) ---------- */
+let aiOn=false;
+const API="/api/ai";
+function parseLoose(txt){ const a=txt.indexOf("{")>=0&&(txt.indexOf("[")<0||txt.indexOf("{")<txt.indexOf("["))?"{":"["; const s=txt.indexOf(a), e=txt.lastIndexOf(a==="{"?"}":"]"); return JSON.parse(txt.slice(s,e+1)); }
+async function callAI(task, payload){
+  const r=await fetch(API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign({task},payload))});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ const e=new Error(j.error||("ошибка сервера "+r.status)); if(r.status===429) e.code="rate_limited"; throw e; }
+  return j.text||"";
+}
+function aiErr(e){ if(e&&e.code==="rate_limited") return "Слишком много запросов — попробуйте через несколько минут."; return "Не получилось: "+(e&&e.message?e.message:"ошибка ответа ИИ"); }
+
+function promptInput(){ const {meds=[]}=state.result||{}; const P=state.patient, R=state.routine;
+  const presc=state.drugs.map((d,i)=>{ const m=meds[i]||{}; return {id:"rx"+(i+1), name:m.name||d.name, active_ingredient:m.ingredient||d.ingredient, dose:d.dose, times_per_day:+d.n, interval_hours:+d.interval||null, duration_days:d.days==="forever"?null:(+d.days||null), ongoing:d.days==="forever", external:!!d.external, food_relation_from_doctor:d.doctor==="none"?null:REL[d.doctor], start_date:d.start}; });
+  const drug_db={}; state.drugs.forEach((d,i)=>{ const db=d.key!=="custom"?DB[d.key]:null; if(!db) return; const id="rx"+(i+1);
+    const inter=[]; state.drugs.forEach((o,j)=>{ if(j===i) return; const og=o.key!=="custom"?DB[o.key].groups:o.groups; const g=gapRule(db.groups,og); if(g.h) inter.push({with_ingredient:(o.key!=="custom"?DB[o.key].ingredient:o.ingredient)||o.name, min_gap_hours:g.h}); });
+    drug_db[id]={food_relation:db.food, gap_minutes_food:db.gap, interactions:inter, drink_with:"вода", avoid:[], max_daily_dose_mg:db.maxMg||null, elderly_note:db.elderly||null, kidney_note:db.kidney||null}; });
+  return {patient:{age:+P.age||null, allergies:P.allergies.split(/[,;]/).map(s=>s.trim()).filter(Boolean), conditions_flags:{kidney:P.kidney, liver:P.liver, stomach:P.stomach}, language:P.language, fasting_mode:P.fasting},
+    routine:{wake_up:R.wake_up, breakfast:R.breakfast, lunch:R.lunch, dinner:R.dinner, sleep:R.sleep, suhoor:P.fasting?R.suhoor:null, iftar:P.fasting?R.iftar:null},
+    prescription:presc, drug_db, device:{days:7, slots:SLOTS, lcd_cyrillic:P.lcd==="cyr"}, today:TODAY};
+}
+
+function setAI(on){ aiOn=on; $("#ai-card").hidden=!on; ["#btn-compare","#btn-ky"].forEach(s=>$(s).disabled=!on); }
+setAI(false);
+(async()=>{ try{ const r=await fetch(API); const j=await r.json(); setAI(!!(r.ok&&j.ok)); }catch(e){ setAI(false); } })();
+
+$("#btn-parse").onclick=async()=>{ if(!aiOn) return; const text=$("#rx-text").value.trim(); if(!text) return;
+  $("#btn-parse").disabled=true; $("#parse-status").textContent="Читаю рецепт…";
+  const presets=Object.entries(DB).map(([k,v])=>`${k}: ${v.name} (${v.ingredient})`).join("\n");
+  try{ let arr=parseLoose(await callAI("parse",{text, presets, groups:GROUPS})); if(!Array.isArray(arr)) arr=arr.drugs||arr.items||[];
+    const sus=arr.filter(x=>x&&x.suspicious_text); arr=arr.filter(x=>!(x&&x.suspicious_text));
+    arr.forEach(x=>{ const key=x.preset_key&&DB[x.preset_key]?x.preset_key:"custom"; const d=drugFrom(key,{});
+      if(key==="custom"){ d.name=x.name||"Лекарство"; d.ingredient=x.ingredient||""; d.groups=(x.groups||[]).filter(g=>GROUPS.includes(g)); }
+      if(x.dose) d.dose=x.dose; if(x.mg!=null) d.mg=x.mg; if(x.times_per_day) d.n=Math.min(6,Math.max(1,+x.times_per_day));
+      d.interval=x.interval_hours||""; d.days=x.duration_days||(x.ongoing?"forever":""); d.external=!!x.external; d.doctor=HOW[x.food]&&x.food!=="unknown"?x.food:"none"; state.drugs.push(d); });
+    renderMeds(); changed(); $("#parse-status").textContent=`Добавлено: ${arr.length}. Проверьте — ИИ мог ошибиться.`+(sus.length?` В тексте была посторонняя команда («${sus.map(x=>x.suspicious_text).join("», «")}») — она не выполнена.`:""); $("#rx-text").value="";
+  }catch(e){ $("#parse-status").textContent=aiErr(e); }
+  $("#btn-parse").disabled=false; };
+
+$("#btn-compare").onclick=async()=>{ if(!aiOn) return; $("#btn-compare").disabled=true; $("#cmp-status").textContent="ИИ строит расписание по промпту… (до 1–2 минут)"; $("#ai-raw").textContent="";
+  try{ const txt=await callAI("compare",{input:promptInput()}); $("#ai-raw").textContent=txt;
+    const ai=parseLoose(txt); const {out,meds}=state.result;
+    const timesOf=(o,id)=>(o.schedule||[]).filter(e=>(e.items||[]).some(it=>it.rx_id===id)).map(e=>e.time).sort();
+    $("#cmp").innerHTML=`<table class="cmp"><tr><th>Лекарство</th><th>Алгоритм</th><th>ИИ</th></tr>${meds.map(m=>{ const a=timesOf(out,m.id), b=timesOf(ai,m.id);
+      return `<tr><td>${esc(m.name)}</td><td>${a.join(", ")||"—"}</td><td style="color:${a.join()===b.join()?"var(--ok)":"var(--crit)"}">${esc(b.join(", "))||"—"}</td></tr>`; }).join("")}</table>`;
+    $("#cmp-status").textContent=`Статус ИИ: ${ai.status}. Зелёным — совпадает с алгоритмом.`;
+  }catch(e){ $("#cmp-status").textContent=aiErr(e); }
+  $("#btn-compare").disabled=false; };
+
+$("#btn-ky").onclick=async()=>{ if(!aiOn) return; const {out}=state.result; $("#btn-ky").disabled=true; $("#ky-status").textContent="Перевожу…";
+  try{ const r=parseLoose(await callAI("translate",{patient:out.summary_for_patient, caregiver:out.summary_for_caregiver}));
+    state.kyText={patient:r.patient,caregiver:r.caregiver}; state.patient.language="ky"; $("#p-language").value="ky"; renderPlan(); $("#ky-status").textContent="Готово — проверьте перевод.";
+  }catch(e){ $("#ky-status").textContent=aiErr(e); }
+  $("#btn-ky").disabled=false; };
+
+/* ---------- init ---------- */
+syncDay(); render(); renderMeds(); setTab("meds");
+</script>
+</body>
+</html>
